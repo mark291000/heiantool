@@ -8,7 +8,7 @@ from tempfile import NamedTemporaryFile
 
 st.set_page_config(page_title="PDF Extractor Tool", layout="wide")
 st.title("HEIAN Table Extractor Tool")
-st.markdown("Upload Heian PDF files.")
+st.markdown("📌 For any issues related to the app, please contact Mark Dang.")
 
 standard_columns = [
     "Part ID", "Part Name", "Cart Loading", "Qty Req",
