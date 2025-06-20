@@ -10,7 +10,6 @@ st.set_page_config(page_title="PDF Extractor Tool", layout="wide")
 st.title("HEIAN Table Extractor Tool")
 st.markdown("📌 For any issues related to the app, please contact Mark Dang.")
 
-# Cột tiêu chuẩn
 standard_columns = [
     "Part ID",
     "Part Name",
@@ -22,7 +21,6 @@ standard_columns = [
     "Material"
 ]
 
-# Làm sạch bảng
 def clean_and_align_table(df_raw):
     df_raw = df_raw.dropna(how="all").reset_index(drop=True)
 
@@ -48,7 +46,6 @@ def clean_and_align_table(df_raw):
 
     return df_raw
 
-# Trích xuất bảng từ PDF
 def extract_data_from_pdf(file_bytes, filename):
     all_tables = []
     base_name = os.path.splitext(filename)[0]
@@ -89,7 +86,6 @@ def extract_data_from_pdf(file_bytes, filename):
 
     return pd.concat(all_tables, ignore_index=True) if all_tables else pd.DataFrame()
 
-# Upload file PDF
 uploaded_files = st.file_uploader("📂 Kéo và thả file PDF vào đây", type=["pdf"], accept_multiple_files=True)
 
 if uploaded_files:
@@ -112,7 +108,6 @@ if uploaded_files:
         for col in ["Qty Req", "Qty Nested", "Sheet", "Kit"]:
             combined_df[col] = pd.to_numeric(combined_df[col], errors="coerce").fillna(0)
 
-        # Gộp theo Part Name + Program
         grouped_df = combined_df.groupby(["Part Name", "Program"], dropna=False).agg({
             "Sheet": "first",
             "Kit": "first",
@@ -125,12 +120,11 @@ if uploaded_files:
             "Material": "first",
         }).reset_index()
 
-        # Đưa Program lên đầu
         cols = grouped_df.columns.tolist()
         cols.insert(0, cols.pop(cols.index("Program")))
         grouped_df = grouped_df[cols]
+        grouped_df["Part ID"] = pd.to_numeric(grouped_df["Part ID"], errors="coerce").fillna(0).astype(int)
 
-        # Tính toán
         grouped_df["Usage Wood Gross"] = grouped_df.apply(
             lambda row: round(32.96 * row["Sheet"] / row["Kit"], 3) if row["Kit"] else None, axis=1
         )
@@ -142,7 +136,6 @@ if uploaded_files:
             else round(row["Qty Nested"] / row["Kit"], 3) if row["Kit"] else None, axis=1
         )
 
-        # Sắp xếp theo Program và Part Name cho dễ đọc
         grouped_df = grouped_df.sort_values(by=["Program", "Part Name"], ignore_index=True)
 
         st.success("✅ Hoàn tất xử lý!")
