@@ -1,8 +1,8 @@
 import streamlit as st
 import pdfplumber
 import pandas as pd
-import os
 import io
+import os
 import re
 from tempfile import NamedTemporaryFile
 
@@ -10,11 +10,19 @@ st.set_page_config(page_title="PDF Extractor Tool", layout="wide")
 st.title("HEIAN Table Extractor Tool")
 st.markdown("📌 For any issues related to the app, please contact Mark Dang.")
 
+# Cột tiêu chuẩn
 standard_columns = [
-    "Part ID", "Part Name", "Cart Loading", "Qty Req",
-    "Qty Nested", "Part Description", "Production Instructions", "Material"
+    "Part ID",
+    "Part Name",
+    "Cart Loading",
+    "Qty Req",
+    "Qty Nested",
+    "Part Description",
+    "Production Instructions",
+    "Material"
 ]
 
+# Làm sạch bảng
 def clean_and_align_table(df_raw):
     df_raw = df_raw.dropna(how="all").reset_index(drop=True)
 
@@ -37,9 +45,10 @@ def clean_and_align_table(df_raw):
         df_raw.insert(2, "Cart Loading", pd.NA)
     else:
         raise ValueError(f"❌ Bảng có {n_col} cột. Yêu cầu 7 hoặc 8 cột.")
-    
+
     return df_raw
 
+# Trích xuất bảng từ PDF
 def extract_data_from_pdf(file_bytes, filename):
     all_tables = []
     base_name = os.path.splitext(filename)[0]
@@ -76,27 +85,25 @@ def extract_data_from_pdf(file_bytes, filename):
                     df_clean["Kit"] = kit_count
                     all_tables.append(df_clean)
                 except Exception as e:
-                    st.warning(f"⚠️ Error table: {e}")
+                    st.warning(f"⚠️ Lỗi khi xử lý bảng từ {filename}: {e}")
 
     return pd.concat(all_tables, ignore_index=True) if all_tables else pd.DataFrame()
 
-uploaded_files = st.file_uploader("📂 Drag and drop files here", type=["pdf"], accept_multiple_files=True)
+# Upload file PDF
+uploaded_files = st.file_uploader("📂 Kéo và thả file PDF vào đây", type=["pdf"], accept_multiple_files=True)
 
 if uploaded_files:
     df_list = []
-    total_files = len(uploaded_files)
+    total = len(uploaded_files)
+    progress = st.progress(0)
+    status = st.empty()
 
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-
-    for i, file in enumerate(uploaded_files, 1):
-        status_text.text(f"🔍 Đang xử lý {file.name} ({i}/{total_files})")
+    for idx, file in enumerate(uploaded_files, 1):
+        status.text(f"🔍 Đang xử lý: {file.name} ({idx}/{total})")
         df = extract_data_from_pdf(file, file.name)
-
         if not df.empty:
             df_list.append(df)
-
-        progress_bar.progress(i / total_files)
+        progress.progress(idx / total)
 
     if df_list:
         combined_df = pd.concat(df_list, ignore_index=True)
@@ -105,8 +112,8 @@ if uploaded_files:
         for col in ["Qty Req", "Qty Nested", "Sheet", "Kit"]:
             combined_df[col] = pd.to_numeric(combined_df[col], errors="coerce").fillna(0)
 
-        grouped_df = combined_df.groupby("Part Name", dropna=False).agg({
-            "Program": "first",
+        # Gộp theo Part Name + Program
+        grouped_df = combined_df.groupby(["Part Name", "Program"], dropna=False).agg({
             "Sheet": "first",
             "Kit": "first",
             "Part ID": "first",
@@ -118,10 +125,12 @@ if uploaded_files:
             "Material": "first",
         }).reset_index()
 
+        # Đưa Program lên đầu
         cols = grouped_df.columns.tolist()
         cols.insert(0, cols.pop(cols.index("Program")))
-        grouped_df = grouped_df[cols].sort_values(by="Program").reset_index(drop=True)
+        grouped_df = grouped_df[cols]
 
+        # Tính toán
         grouped_df["Usage Wood Gross"] = grouped_df.apply(
             lambda row: round(32.96 * row["Sheet"] / row["Kit"], 3) if row["Kit"] else None, axis=1
         )
@@ -133,17 +142,21 @@ if uploaded_files:
             else round(row["Qty Nested"] / row["Kit"], 3) if row["Kit"] else None, axis=1
         )
 
-        st.success("✅ Completed!")
+        # Sắp xếp theo Program và Part Name cho dễ đọc
+        grouped_df = grouped_df.sort_values(by=["Program", "Part Name"], ignore_index=True)
+
+        st.success("✅ Hoàn tất xử lý!")
         st.dataframe(grouped_df, use_container_width=True)
 
+        # Export file Excel
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
             grouped_df.to_excel(writer, index=False, sheet_name="Summary")
         st.download_button(
-            label="📥 Export  Excel",
+            label="📥 Tải Excel kết quả",
             data=output.getvalue(),
             file_name="extracted_summary.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     else:
-        st.error("❌ No data matching.")
+        st.error("❌ Không tìm thấy dữ liệu hợp lệ.")
