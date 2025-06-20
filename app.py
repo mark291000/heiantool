@@ -120,7 +120,7 @@ if uploaded_files:
 
         cols = grouped_df.columns.tolist()
         cols.insert(0, cols.pop(cols.index("Program")))
-        grouped_df = grouped_df[cols]
+        grouped_df = grouped_df[cols].sort_values(by="Program").reset_index(drop=True)
 
         grouped_df["Usage Wood Gross"] = grouped_df.apply(
             lambda row: round(32.96 * row["Sheet"] / row["Kit"], 3) if row["Kit"] else None, axis=1
