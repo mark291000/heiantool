@@ -56,6 +56,8 @@ def extract_thickness_and_scrap_from_text(text):
 
 def get_material_code(thickness):
     """Xác định mã Material dựa trên Thickness"""
+    if pd.isna(thickness):
+        return ""
     if thickness == 15:
         return "280040WNK"
     elif thickness == 18:
@@ -152,58 +154,67 @@ if uploaded_files:
         combined_df = pd.concat(df_list, ignore_index=True)
         combined_df = combined_df[combined_df["Part Name"].notna()]
 
+        # **THAY ĐỔI: Lấy thông tin cơ bản từ tất cả Programs**
+        # Tạo DataFrame với thông tin cơ bản của mỗi Program
+        basic_info = combined_df.groupby("Program", as_index=False).agg({
+            "Sheet": "first",
+            "Kit": "first",
+            "Thickness": "first",
+            "Scrap Sheet1": "first",
+            "Scrap Sheet2": "first"
+        })
+
         # Lọc chỉ lấy OFFAL
-        combined_df = combined_df[combined_df["Part Name"].str.contains("OFFAL", case=False, na=False)]
+        offal_df = combined_df[combined_df["Part Name"].str.contains("OFFAL", case=False, na=False)]
 
-        if combined_df.empty:
-            st.error("❌ Không tìm thấy Part name nào chứa 'OFFAL'")
+        if offal_df.empty:
+            # **Nếu không có OFFAL, vẫn hiển thị thông tin cơ bản**
+            result_df = basic_info.copy()
+            result_df["Block Offal"] = None  # Để trống
+            st.info("ℹ️ Không tìm thấy Part name nào chứa 'OFFAL' - Hiển thị thông tin cơ bản")
         else:
-            # Chuyển đổi kiểu dữ liệu
+            # Chuyển đổi kiểu dữ liệu cho OFFAL
             for col in ["Qty Req", "Qty Nested", "Sheet", "Kit"]:
-                if col in combined_df.columns:
-                    combined_df[col] = pd.to_numeric(combined_df[col], errors="coerce").fillna(0)
+                if col in offal_df.columns:
+                    offal_df[col] = pd.to_numeric(offal_df[col], errors="coerce").fillna(0)
 
-            # **THAY ĐỔI CHÍNH: Cộng tất cả Qty Nested theo Program**
-            result_df = combined_df.groupby("Program", as_index=False).agg({
-                "Sheet": "first",
-                "Kit": "first",
-                "Thickness": "first",
-                "Scrap Sheet1": "first",
-                "Scrap Sheet2": "first",
+            # Cộng tất cả Qty Nested theo Program
+            offal_summary = offal_df.groupby("Program", as_index=False).agg({
                 "Qty Nested": "sum"  # Cộng tất cả Qty Nested
             })
+            offal_summary.rename(columns={"Qty Nested": "Block Offal"}, inplace=True)
 
-            # Đổi tên cột Qty Nested thành Block Offal
-            result_df.rename(columns={"Qty Nested": "Block Offal"}, inplace=True)
+            # **Merge thông tin cơ bản với Block Offal**
+            result_df = basic_info.merge(offal_summary, on="Program", how="left")
             
-            # Tạo cột Material dựa trên Thickness
-            result_df["Material"] = result_df["Thickness"].apply(get_material_code)
+            st.success(f"✅ Hoàn tất! Tổng số Program có OFFAL: {len(offal_summary)}")
+        
+        # Tạo cột Material dựa trên Thickness
+        result_df["Material"] = result_df["Thickness"].apply(get_material_code)
 
-            # Chỉ hiển thị các cột yêu cầu
-            final_columns = ["Program", "Sheet", "Kit", "Thickness", "Scrap Sheet1", "Scrap Sheet2", "Block Offal", "Material"]
-            result_df = result_df[final_columns]
+        # Chỉ hiển thị các cột yêu cầu
+        final_columns = ["Program", "Sheet", "Kit", "Thickness", "Scrap Sheet1", "Scrap Sheet2", "Block Offal", "Material"]
+        result_df = result_df[final_columns]
 
-            # Sắp xếp theo Program
-            result_df = result_df.sort_values(by=["Program"], ignore_index=True)
+        # Sắp xếp theo Program
+        result_df = result_df.sort_values(by=["Program"], ignore_index=True)
 
-            st.success(f"✅ Hoàn tất! Tổng số Program có OFFAL: {len(result_df)}")
-            
-            # Hiển thị bảng
-            st.dataframe(result_df, use_container_width=True)
+        # Hiển thị bảng
+        st.dataframe(result_df, use_container_width=True)
 
-            # Tạo file Excel để download
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                result_df.to_excel(writer, index=False, sheet_name="OFFAL Parts")
-            
-            output.seek(0)
-            
-            st.download_button(
-                label="📥 Download Excel",
-                data=output,
-                file_name="extracted_offal_summary.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+        # Tạo file Excel để download
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            result_df.to_excel(writer, index=False, sheet_name="OFFAL Parts")
+        
+        output.seek(0)
+        
+        st.download_button(
+            label="📥 Download Excel",
+            data=output,
+            file_name="extracted_offal_summary.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
     else:
         st.error("❌ Không tìm thấy dữ liệu hợp lệ trong các file PDF.")
 else:
