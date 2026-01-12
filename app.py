@@ -140,7 +140,8 @@ if uploaded_files:
         total = len(uploaded_files)
         
         for idx, uploaded_file in enumerate(uploaded_files):
-            st.info(f"🔍 Đang xử lý: {uploaded_file.name} ({idx + 1}/{total})")
+            # DÒNG NÀY ĐÃ BỊ XÓA - không hiển thị status nữa
+            # st.info(f"🔍 Đang xử lý: {uploaded_file.name} ({idx + 1}/{total})")
             
             file_bytes = uploaded_file.read()
             df = extract_data_from_pdf(file_bytes, uploaded_file.name)
@@ -154,7 +155,6 @@ if uploaded_files:
         combined_df = pd.concat(df_list, ignore_index=True)
         combined_df = combined_df[combined_df["Part Name"].notna()]
 
-        # **THAY ĐỔI: Lấy thông tin cơ bản từ tất cả Programs**
         # Tạo DataFrame với thông tin cơ bản của mỗi Program
         basic_info = combined_df.groupby("Program", as_index=False).agg({
             "Sheet": "first",
@@ -168,9 +168,8 @@ if uploaded_files:
         offal_df = combined_df[combined_df["Part Name"].str.contains("OFFAL", case=False, na=False)]
 
         if offal_df.empty:
-            # **Nếu không có OFFAL, vẫn hiển thị thông tin cơ bản**
             result_df = basic_info.copy()
-            result_df["Block Offal"] = None  # Để trống
+            result_df["Block Offal"] = None
             st.info("ℹ️ Không tìm thấy Part name nào chứa 'OFFAL' - Hiển thị thông tin cơ bản")
         else:
             # Chuyển đổi kiểu dữ liệu cho OFFAL
@@ -180,11 +179,11 @@ if uploaded_files:
 
             # Cộng tất cả Qty Nested theo Program
             offal_summary = offal_df.groupby("Program", as_index=False).agg({
-                "Qty Nested": "sum"  # Cộng tất cả Qty Nested
+                "Qty Nested": "sum"
             })
             offal_summary.rename(columns={"Qty Nested": "Block Offal"}, inplace=True)
 
-            # **Merge thông tin cơ bản với Block Offal**
+            # Merge thông tin cơ bản với Block Offal
             result_df = basic_info.merge(offal_summary, on="Program", how="left")
             
             st.success(f"✅ Hoàn tất! Tổng số Program có OFFAL: {len(offal_summary)}")
