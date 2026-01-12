@@ -3,7 +3,6 @@ import pdfplumber
 import pandas as pd
 import io
 import re
-from tempfile import NamedTemporaryFile
 
 st.set_page_config(page_title="HEIAN OFFAL Extractor", page_icon="📊", layout="wide")
 
@@ -159,28 +158,35 @@ if uploaded_files:
         if combined_df.empty:
             st.error("❌ Không tìm thấy Part name nào chứa 'OFFAL'")
         else:
-            # Lấy OFFAL đầu tiên theo Program
-            combined_df = combined_df.groupby("Program").first().reset_index()
-
             # Chuyển đổi kiểu dữ liệu
             for col in ["Qty Req", "Qty Nested", "Sheet", "Kit"]:
                 if col in combined_df.columns:
                     combined_df[col] = pd.to_numeric(combined_df[col], errors="coerce").fillna(0)
 
-            # Tạo cột Block Offal
-            combined_df["Block Offal"] = combined_df["Qty Nested"]
+            # **THAY ĐỔI CHÍNH: Cộng tất cả Qty Nested theo Program**
+            result_df = combined_df.groupby("Program", as_index=False).agg({
+                "Sheet": "first",
+                "Kit": "first",
+                "Thickness": "first",
+                "Scrap Sheet1": "first",
+                "Scrap Sheet2": "first",
+                "Qty Nested": "sum"  # Cộng tất cả Qty Nested
+            })
+
+            # Đổi tên cột Qty Nested thành Block Offal
+            result_df.rename(columns={"Qty Nested": "Block Offal"}, inplace=True)
             
             # Tạo cột Material dựa trên Thickness
-            combined_df["Material"] = combined_df["Thickness"].apply(get_material_code)
+            result_df["Material"] = result_df["Thickness"].apply(get_material_code)
 
             # Chỉ hiển thị các cột yêu cầu
             final_columns = ["Program", "Sheet", "Kit", "Thickness", "Scrap Sheet1", "Scrap Sheet2", "Block Offal", "Material"]
-            result_df = combined_df[final_columns]
+            result_df = result_df[final_columns]
 
             # Sắp xếp theo Program
             result_df = result_df.sort_values(by=["Program"], ignore_index=True)
 
-            st.success(f"✅ Hoàn tất! Tổng số dòng OFFAL: {len(result_df)}")
+            st.success(f"✅ Hoàn tất! Tổng số Program có OFFAL: {len(result_df)}")
             
             # Hiển thị bảng
             st.dataframe(result_df, use_container_width=True)
