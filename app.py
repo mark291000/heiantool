@@ -2,17 +2,23 @@ import streamlit as st
 import pdfplumber
 import pandas as pd
 import io
+import os
 import re
+from tempfile import NamedTemporaryFile
 
-st.set_page_config(page_title="HEIAN OFFAL Extractor", page_icon="📊", layout="wide")
+st.set_page_config(page_title="PDF Extractor Tool", layout="wide")
+st.title("HEIAN Table Extractor Tool")
+st.markdown("📌 For any issues related to the app, please contact Mark Dang.")
 
-st.title("📊 HEIAN Table Extractor - OFFAL Filter")
-st.markdown("---")
-
-# Cột chuẩn
 standard_columns = [
-    "Part ID", "Part Name", "Cart Loading", "Qty Req", 
-    "Qty Nested", "Part Description", "Production Instructions", "Material"
+    "Part ID",
+    "Part Name",
+    "Cart Loading",
+    "Qty Req",
+    "Qty Nested",
+    "Part Description",
+    "Production Instructions",
+    "Material"
 ]
 
 def clean_and_align_table(df_raw):
@@ -40,66 +46,24 @@ def clean_and_align_table(df_raw):
 
     return df_raw
 
-def extract_thickness_and_scrap_from_text(text):
-    thickness = None
-    scrap = None
-    
-    thickness_match = re.search(r'Thickness:\s*(\d+(?:\.\d+)?)\s*MM', text, re.IGNORECASE)
-    if thickness_match:
-        thickness = float(thickness_match.group(1))
-    
-    scrap_match = re.search(r'Scrap:\s*(\d+(?:\.\d+)?)\s*%', text, re.IGNORECASE)
-    if scrap_match:
-        scrap = scrap_match.group(1) + "%"
-    
-    return thickness, scrap
-
-def get_material_code(thickness):
-    """Xác định mã Material dựa trên Thickness"""
-    if pd.isna(thickness):
-        return ""
-    if thickness == 15:
-        return "280040WNK"
-    elif thickness == 18:
-        return "280045WNK"
-    elif thickness == 12:
-        return "280090WNK"
-    elif thickness == 9:
-        return "280062"
-    else:
-        return ""
-
 def extract_data_from_pdf(file_bytes, filename):
     all_tables = []
-    base_name = filename.replace('.pdf', '')
-    
-    thickness_value = None
-    scrap_sheet1 = None
-    scrap_sheet2 = None
+    base_name = os.path.splitext(filename)[0]
 
-    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+    with NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        tmp.write(file_bytes.getvalue())
+        tmp_path = tmp.name
+
+    with pdfplumber.open(tmp_path) as pdf:
         full_text = "\n".join([page.extract_text() or "" for page in pdf.pages])
         match = re.search(r"(\d+(\.\d+)?)\s*Sheet\(s\)\s*=\s*(\d+(\.\d+)?)\s*Kit\(s\)", full_text, re.IGNORECASE)
         sheet_count = float(match.group(1)) if match else None
         kit_count = float(match.group(3)) if match else None
 
-        for page_num, page in enumerate(pdf.pages, 1):
-            page_text = page.extract_text() or ""
-            thickness, scrap = extract_thickness_and_scrap_from_text(page_text)
-            
-            if thickness and thickness_value is None:
-                thickness_value = thickness
-            
-            if scrap:
-                if page_num == 1:
-                    scrap_sheet1 = scrap
-                elif page_num == 2:
-                    scrap_sheet2 = scrap
-            
+        for page in pdf.pages:
             tables = page.extract_tables()
             if not tables:
                 continue
-            
             for table in tables:
                 if not table or len(table) < 2:
                     continue
@@ -113,108 +77,80 @@ def extract_data_from_pdf(file_bytes, filename):
 
                 try:
                     df_clean = clean_and_align_table(df_temp)
-                    df_clean.insert(0, "Program", base_name)
+                    df_clean.insert(1, "Program", base_name)
                     df_clean["Sheet"] = sheet_count
                     df_clean["Kit"] = kit_count
-                    df_clean["Thickness"] = thickness_value
-                    df_clean["Scrap Sheet1"] = scrap_sheet1
-                    df_clean["Scrap Sheet2"] = scrap_sheet2
                     all_tables.append(df_clean)
                 except Exception as e:
                     st.warning(f"⚠️ Lỗi khi xử lý bảng từ {filename}: {e}")
 
     return pd.concat(all_tables, ignore_index=True) if all_tables else pd.DataFrame()
 
-# Upload files
-uploaded_files = st.file_uploader(
-    "📂 Chọn hoặc kéo thả file PDF", 
-    type=['pdf'], 
-    accept_multiple_files=True
-)
+uploaded_files = st.file_uploader("📂 Kéo và thả file PDF vào đây", type=["pdf"], accept_multiple_files=True)
 
 if uploaded_files:
-    with st.spinner('🔄 Đang xử lý các file PDF...'):
-        df_list = []
-        
-        progress_bar = st.progress(0)
-        total = len(uploaded_files)
-        
-        for idx, uploaded_file in enumerate(uploaded_files):
-            # DÒNG NÀY ĐÃ BỊ XÓA - không hiển thị status nữa
-            # st.info(f"🔍 Đang xử lý: {uploaded_file.name} ({idx + 1}/{total})")
-            
-            file_bytes = uploaded_file.read()
-            df = extract_data_from_pdf(file_bytes, uploaded_file.name)
-            
-            if not df.empty:
-                df_list.append(df)
-            
-            progress_bar.progress((idx + 1) / total)
+    df_list = []
+    total = len(uploaded_files)
+    progress = st.progress(0)
+    status = st.empty()
+
+    for idx, file in enumerate(uploaded_files, 1):
+        status.text(f"🔍 Đang xử lý: {file.name} ({idx}/{total})")
+        df = extract_data_from_pdf(file, file.name)
+        if not df.empty:
+            df_list.append(df)
+        progress.progress(idx / total)
 
     if df_list:
         combined_df = pd.concat(df_list, ignore_index=True)
         combined_df = combined_df[combined_df["Part Name"].notna()]
 
-        # Tạo DataFrame với thông tin cơ bản của mỗi Program
-        basic_info = combined_df.groupby("Program", as_index=False).agg({
+        for col in ["Qty Req", "Qty Nested", "Sheet", "Kit"]:
+            combined_df[col] = pd.to_numeric(combined_df[col], errors="coerce").fillna(0)
+
+        grouped_df = combined_df.groupby(["Part Name", "Program"], dropna=False).agg({
             "Sheet": "first",
             "Kit": "first",
-            "Thickness": "first",
-            "Scrap Sheet1": "first",
-            "Scrap Sheet2": "first"
-        })
+            "Part ID": "first",
+            "Cart Loading": "first",
+            "Qty Req": "sum",
+            "Qty Nested": "sum",
+            "Part Description": "first",
+            "Production Instructions": "first",
+            "Material": "first",
+        }).reset_index()
 
-        # Lọc chỉ lấy OFFAL
-        offal_df = combined_df[combined_df["Part Name"].str.contains("OFFAL", case=False, na=False)]
+        cols = grouped_df.columns.tolist()
+        cols.insert(0, cols.pop(cols.index("Program")))
+        grouped_df = grouped_df[cols]
+        grouped_df["Part ID"] = pd.to_numeric(grouped_df["Part ID"], errors="coerce").fillna(0).astype(int)
 
-        if offal_df.empty:
-            result_df = basic_info.copy()
-            result_df["Block Offal"] = None
-            st.info("ℹ️ Không tìm thấy Part name nào chứa 'OFFAL' - Hiển thị thông tin cơ bản")
-        else:
-            # Chuyển đổi kiểu dữ liệu cho OFFAL
-            for col in ["Qty Req", "Qty Nested", "Sheet", "Kit"]:
-                if col in offal_df.columns:
-                    offal_df[col] = pd.to_numeric(offal_df[col], errors="coerce").fillna(0)
+        grouped_df["Usage Wood Gross"] = grouped_df.apply(
+            lambda row: round(32.96 * row["Sheet"] / row["Kit"], 3) if row["Kit"] else None, axis=1
+        )
+        grouped_df["Usage Wood Net"] = grouped_df.apply(
+            lambda row: round(32 * row["Sheet"] / row["Kit"], 3) if row["Kit"] else None, axis=1
+        )
+        grouped_df["Usage CNC Part"] = grouped_df.apply(
+            lambda row: row["Qty Nested"] if "offal" in str(row["Part Name"]).lower()
+            else round(row["Qty Nested"] / row["Kit"], 3) if row["Kit"] else None, axis=1
+        )
 
-            # Cộng tất cả Qty Nested theo Program
-            offal_summary = offal_df.groupby("Program", as_index=False).agg({
-                "Qty Nested": "sum"
-            })
-            offal_summary.rename(columns={"Qty Nested": "Block Offal"}, inplace=True)
+        grouped_df = grouped_df.sort_values(by=["Program", "Part Name"], ignore_index=True)
 
-            # Merge thông tin cơ bản với Block Offal
-            result_df = basic_info.merge(offal_summary, on="Program", how="left")
-            
-            st.success(f"✅ Hoàn tất! Tổng số Program có OFFAL: {len(offal_summary)}")
-        
-        # Tạo cột Material dựa trên Thickness
-        result_df["Material"] = result_df["Thickness"].apply(get_material_code)
+        st.success("✅ Hoàn tất xử lý!")
+        st.dataframe(grouped_df, use_container_width=True)
 
-        # Chỉ hiển thị các cột yêu cầu
-        final_columns = ["Program", "Sheet", "Kit", "Thickness", "Scrap Sheet1", "Scrap Sheet2", "Block Offal", "Material"]
-        result_df = result_df[final_columns]
-
-        # Sắp xếp theo Program
-        result_df = result_df.sort_values(by=["Program"], ignore_index=True)
-
-        # Hiển thị bảng
-        st.dataframe(result_df, use_container_width=True)
-
-        # Tạo file Excel để download
+        # Export file Excel
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            result_df.to_excel(writer, index=False, sheet_name="OFFAL Parts")
-        
-        output.seek(0)
-        
+            grouped_df.to_excel(writer, index=False, sheet_name="Summary")
         st.download_button(
-            label="📥 Download Excel",
-            data=output,
-            file_name="extracted_offal_summary.xlsx",
+            label="📥 Tải Excel kết quả",
+            data=output.getvalue(),
+            file_name="extracted_summary.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     else:
-        st.error("❌ Không tìm thấy dữ liệu hợp lệ trong các file PDF.")
-else:
-    st.info("👆 Vui lòng upload file PDF để bắt đầu")
+        st.error("❌ Không tìm thấy dữ liệu hợp lệ.")
+
