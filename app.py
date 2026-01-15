@@ -91,6 +91,23 @@ def extract_data_from_pdf(file_bytes, filename):
 
     return pd.concat(all_tables, ignore_index=True) if all_tables else pd.DataFrame()
 
+def count_parts_with_lr_pattern(description):
+    """
+    Kiểm tra nếu Part Description có dạng L**/***R** (chữ L, các kí tự, dấu phân cách, chữ R)
+    Trả về 2 nếu khớp pattern, 1 nếu không khớp
+    """
+    if pd.isna(description):
+        return 1
+    
+    desc_str = str(description).strip()
+    # Pattern: L + bất kỳ ký tự nào + dấu phân cách (/, -, \, |, v.v.) + bất kỳ ký tự nào + R
+    # Sử dụng \W để match bất kỳ ký tự không phải chữ/số (dấu phân cách)
+    pattern = r'^L.+[\W_].+R$'
+    
+    if re.search(pattern, desc_str, re.IGNORECASE):
+        return 2
+    return 1
+
 uploaded_files = st.file_uploader("📂 Kéo và thả file PDF vào đây", type=["pdf"], accept_multiple_files=True)
 
 if uploaded_files:
@@ -119,10 +136,15 @@ if uploaded_files:
         for program in combined_df["Program"].unique():
             program_df = combined_df[combined_df["Program"] == program]
             
-            # Đếm Different Parts (đếm TẤT CẢ Part Name, kể cả trùng, nhưng loại trừ Part có Description chứa "RELIEF")
-            different_parts = len(program_df[
+            # Lọc ra những Part không có Description chứa "RELIEF"
+            filtered_df = program_df[
                 ~program_df["Part Description"].astype(str).str.contains("RELIEF", case=False, na=False)
-            ])
+            ]
+            
+            # Đếm Different Parts với logic:
+            # - Nếu Description có dạng L**/***R**: đếm là 2
+            # - Nếu không: đếm là 1
+            different_parts = filtered_df["Part Description"].apply(count_parts_with_lr_pattern).sum()
             
             # Tổng số parts
             total_parts = program_df["Qty Nested"].sum()
@@ -138,7 +160,7 @@ if uploaded_files:
                 "Status": "",
                 "Program": program,
                 "Cycle Time": "",
-                "Different Parts": different_parts,
+                "Different Parts": int(different_parts),
                 "Total # of parts": int(total_parts),
                 "Frames/kit": frames_kit,
                 "Number of Tables": int(number_of_tables) if number_of_tables else None,
