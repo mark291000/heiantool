@@ -5,7 +5,6 @@ import io
 import os
 import re
 from tempfile import NamedTemporaryFile
-from datetime import datetime
 
 st.set_page_config(page_title="PDF Extractor Tool", layout="wide")
 st.title("HEIAN Table Extractor Tool")
@@ -109,47 +108,43 @@ if uploaded_files:
         for col in ["Qty Req", "Qty Nested", "Sheet", "Kit"]:
             combined_df[col] = pd.to_numeric(combined_df[col], errors="coerce").fillna(0)
 
-        # Tạo bảng kết quả theo format mới
-        result_data = []
-        
-        for program in combined_df["Program"].unique():
-            program_df = combined_df[combined_df["Program"] == program]
-            
-            # Đếm Different Parts (không tính Part có Description chứa "RELIEF")
-            different_parts = program_df[
-                ~program_df["Part Description"].astype(str).str.contains("RELIEF", case=False, na=False)
-            ]["Part Name"].nunique()
-            
-            # Tổng số parts
-            total_parts = program_df["Qty Nested"].sum()
-            
-            # Lấy giá trị Kit và Sheet (giả sử mỗi Program có giá trị duy nhất)
-            frames_kit = program_df["Kit"].iloc[0] if not program_df.empty else None
-            number_of_tables = program_df["Sheet"].iloc[0] if not program_df.empty else None
-            
-            # Ngày hiện tại
-            today = datetime.now().strftime("%m/%d/%Y")
-            
-            result_data.append({
-                "Status": "",
-                "Program": program,
-                "Cycle Time": "",
-                "Different Parts": different_parts,
-                "Total # of parts": int(total_parts),
-                "Frames/kit": frames_kit,
-                "Number of Tables": number_of_tables,
-                "Date cycle time was done": today
-            })
-        
-        result_df = pd.DataFrame(result_data)
-        
-        st.success("✅ Hoàn tất xử lý!")
-        st.dataframe(result_df, use_container_width=True)
+        grouped_df = combined_df.groupby(["Part Name", "Program"], dropna=False).agg({
+            "Sheet": "first",
+            "Kit": "first",
+            "Part ID": "first",
+            "Cart Loading": "first",
+            "Qty Req": "sum",
+            "Qty Nested": "sum",
+            "Part Description": "first",
+            "Production Instructions": "first",
+            "Material": "first",
+        }).reset_index()
 
-        # Export file Excel với bảng kết quả mới
+        cols = grouped_df.columns.tolist()
+        cols.insert(0, cols.pop(cols.index("Program")))
+        grouped_df = grouped_df[cols]
+        grouped_df["Part ID"] = pd.to_numeric(grouped_df["Part ID"], errors="coerce").fillna(0).astype(int)
+
+        grouped_df["Usage Wood Gross"] = grouped_df.apply(
+            lambda row: round(32.96 * row["Sheet"] / row["Kit"], 3) if row["Kit"] else None, axis=1
+        )
+        grouped_df["Usage Wood Net"] = grouped_df.apply(
+            lambda row: round(32 * row["Sheet"] / row["Kit"], 3) if row["Kit"] else None, axis=1
+        )
+        grouped_df["Usage CNC Part"] = grouped_df.apply(
+            lambda row: row["Qty Nested"] if "offal" in str(row["Part Name"]).lower()
+            else round(row["Qty Nested"] / row["Kit"], 3) if row["Kit"] else None, axis=1
+        )
+
+        grouped_df = grouped_df.sort_values(by=["Program", "Part Name"], ignore_index=True)
+
+        st.success("✅ Hoàn tất xử lý!")
+        st.dataframe(grouped_df, use_container_width=True)
+
+        # Export file Excel
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            result_df.to_excel(writer, index=False, sheet_name="Summary")
+            grouped_df.to_excel(writer, index=False, sheet_name="Summary")
         st.download_button(
             label="📥 Tải Excel kết quả",
             data=output.getvalue(),
@@ -158,3 +153,4 @@ if uploaded_files:
         )
     else:
         st.error("❌ Không tìm thấy dữ liệu hợp lệ.")
+
