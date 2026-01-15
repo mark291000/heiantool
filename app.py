@@ -113,33 +113,16 @@ if uploaded_files:
         for col in ["Qty Req", "Qty Nested", "Sheet", "Kit"]:
             combined_df[col] = pd.to_numeric(combined_df[col], errors="coerce").fillna(0)
 
-        # Hiển thị bảng chi tiết (KHÔNG loại bỏ Part Name trùng)
-        detail_df = combined_df.copy()
-        detail_df["Part ID"] = pd.to_numeric(detail_df["Part ID"], errors="coerce").fillna(0).astype(int)
-
-        detail_df["Usage Wood Gross"] = detail_df.apply(
-            lambda row: round(32.96 * row["Sheet"] / row["Kit"], 3) if row["Kit"] else None, axis=1
-        )
-        detail_df["Usage Wood Net"] = detail_df.apply(
-            lambda row: round(32 * row["Sheet"] / row["Kit"], 3) if row["Kit"] else None, axis=1
-        )
-        detail_df["Usage CNC Part"] = detail_df.apply(
-            lambda row: row["Qty Nested"] if "offal" in str(row["Part Name"]).lower()
-            else round(row["Qty Nested"] / row["Kit"], 3) if row["Kit"] else None, axis=1
-        )
-
-        detail_df = detail_df.sort_values(by=["Program", "Part Name"], ignore_index=True)
-
         # Tạo bảng kết quả tổng hợp
         result_data = []
         
         for program in combined_df["Program"].unique():
             program_df = combined_df[combined_df["Program"] == program]
             
-            # Đếm Different Parts (không tính Part có Description chứa "RELIEF")
-            different_parts = program_df[
+            # Đếm Different Parts (đếm TẤT CẢ Part Name, kể cả trùng, nhưng loại trừ Part có Description chứa "RELIEF")
+            different_parts = len(program_df[
                 ~program_df["Part Description"].astype(str).str.contains("RELIEF", case=False, na=False)
-            ]["Part Name"].nunique()
+            ])
             
             # Tổng số parts
             total_parts = program_df["Qty Nested"].sum()
@@ -165,20 +148,12 @@ if uploaded_files:
         result_df = pd.DataFrame(result_data)
         
         st.success("✅ Hoàn tất xử lý!")
-        
-        # Hiển thị bảng tổng hợp
-        st.subheader("📊 Bảng Tổng Hợp")
         st.dataframe(result_df, use_container_width=True)
-        
-        # Hiển thị bảng chi tiết
-        st.subheader("📋 Bảng Chi Tiết (Không loại bỏ Part Name trùng)")
-        st.dataframe(detail_df, use_container_width=True)
 
-        # Export file Excel với cả 2 bảng
+        # Export file Excel
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
             result_df.to_excel(writer, index=False, sheet_name="Summary")
-            detail_df.to_excel(writer, index=False, sheet_name="Detail")
         st.download_button(
             label="📥 Tải Excel kết quả",
             data=output.getvalue(),
