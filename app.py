@@ -111,12 +111,6 @@ def count_parts_with_lr_pattern(description):
         return 2
     return 1
 
-def convert_df_to_clipboard_format(df):
-    """
-    Chuyển DataFrame thành format có thể copy vào Excel/Google Sheets
-    """
-    return df.to_csv(index=False, sep='\t')
-
 uploaded_files = st.file_uploader("📂 Kéo và thả file PDF vào đây", type=["pdf"], accept_multiple_files=True)
 
 if uploaded_files:
@@ -179,44 +173,17 @@ if uploaded_files:
         result_df = pd.DataFrame(result_data)
         
         st.success("✅ Hoàn tất xử lý!")
-        
-        # Tạo 2 cột cho nút Copy và Download
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            # Nút Copy bảng
-            clipboard_data = convert_df_to_clipboard_format(result_df)
-            st.download_button(
-                label="📋 Copy bảng (TSV format)",
-                data=clipboard_data,
-                file_name="table_copy.tsv",
-                mime="text/tab-separated-values",
-                help="Click để download file TSV, sau đó mở và copy vào Excel/Google Sheets"
-            )
-        
-        with col2:
-            # Nút Download Excel
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                result_df.to_excel(writer, index=False, sheet_name="Summary")
-            st.download_button(
-                label="📥 Tải Excel kết quả",
-                data=output.getvalue(),
-                file_name="extracted_summary.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-        
-        # Hiển thị bảng
         st.dataframe(result_df, use_container_width=True)
-        
-        # Thêm text area để copy trực tiếp
-        st.markdown("### 📝 Hoặc copy trực tiếp từ ô dưới đây:")
-        st.text_area(
-            "Copy dữ liệu này và paste vào Excel/Google Sheets:",
-            value=clipboard_data,
-            height=200,
-            help="Select All (Ctrl+A) và Copy (Ctrl+C), sau đó paste vào Excel"
+
+        # Export file Excel
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            result_df.to_excel(writer, index=False, sheet_name="Summary")
+        st.download_button(
+            label="📥 Tải Excel kết quả",
+            data=output.getvalue(),
+            file_name="extracted_summary.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-        
     else:
         st.error("❌ Không tìm thấy dữ liệu hợp lệ.")
